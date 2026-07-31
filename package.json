@@ -1,0 +1,14 @@
+{
+  "name": "tycon-deployer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TYCON token deployment CLI for Robinhood Chain",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "ethers": "^6.15.0",
+    "solc": "^0.8.30"
+  }
+}
