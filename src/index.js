@@ -84,20 +84,46 @@ function ask(
 
 // ======================================================
 // HIDDEN PRIVATE KEY INPUT
+//
+// IMPORTANT:
+//
+// Do NOT pause stdin after reading the key.
+// We still need readline later for DEPLOY confirmation.
 // ======================================================
 
 function askPrivateKey() {
   return new Promise(
-    (resolve) => {
+    (resolve, reject) => {
       const stdin =
         process.stdin;
 
       const stdout =
         process.stdout;
 
+      if (
+        !stdin.isTTY ||
+        typeof stdin.setRawMode !==
+          "function"
+      ) {
+        reject(
+          new Error(
+            "Hidden private-key input requires an interactive terminal."
+          )
+        );
+
+        return;
+      }
+
       stdout.write(
         "Enter deployer private key: "
       );
+
+      let value =
+        "";
+
+      // Temporarily stop readline from handling
+      // the private-key keystrokes.
+      rl.pause();
 
       stdin.setRawMode(
         true
@@ -109,49 +135,67 @@ function askPrivateKey() {
         "utf8"
       );
 
-      let value =
-        "";
+      const finish =
+        () => {
+          stdin.removeListener(
+            "data",
+            onData
+          );
+
+          stdin.setRawMode(
+            false
+          );
+
+          stdout.write(
+            "\n"
+          );
+
+          // IMPORTANT:
+          // Resume readline so ask() works later.
+          rl.resume();
+
+          resolve(
+            value.trim()
+          );
+        };
 
       const onData =
         (key) => {
+          // CTRL + C
           if (
             key === "\u0003"
           ) {
+            stdin.removeListener(
+              "data",
+              onData
+            );
+
+            stdin.setRawMode(
+              false
+            );
+
             stdout.write(
               "\n"
             );
+
+            rl.close();
 
             process.exit(
               0
             );
           }
 
+          // ENTER
           if (
             key === "\r" ||
             key === "\n"
           ) {
-            stdin.setRawMode(
-              false
-            );
-
-            stdin.pause();
-
-            stdin.removeListener(
-              "data",
-              onData
-            );
-
-            stdout.write(
-              "\n"
-            );
-
-            resolve(
-              value.trim()
-            );
+            finish();
 
             return;
           }
 
+          // BACKSPACE
           if (
             key === "\u007f" ||
             key === "\b"
@@ -169,7 +213,16 @@ function askPrivateKey() {
             return;
           }
 
-          value += key;
+          // Ignore escape/control sequences.
+          if (
+            key.charCodeAt(0) <
+            32
+          ) {
+            return;
+          }
+
+          value +=
+            key;
         };
 
       stdin.on(
@@ -201,6 +254,18 @@ function normalizePrivateKey(
   }
 
   return `0x${trimmed}`;
+}
+
+// ======================================================
+// PRIVATE KEY VALIDATION
+// ======================================================
+
+function isValidPrivateKey(
+  privateKey
+) {
+  return /^0x[a-fA-F0-9]{64}$/.test(
+    privateKey
+  );
 }
 
 // ======================================================
@@ -396,6 +461,10 @@ function printHeader() {
 async function main() {
   printHeader();
 
+  // ====================================================
+  // PRIVATE KEY
+  // ====================================================
+
   const rawPrivateKey =
     await askPrivateKey();
 
@@ -403,6 +472,20 @@ async function main() {
     normalizePrivateKey(
       rawPrivateKey
     );
+
+  if (
+    !isValidPrivateKey(
+      privateKey
+    )
+  ) {
+    throw new Error(
+      "Invalid private key. Expected 32-byte hex private key."
+    );
+  }
+
+  // ====================================================
+  // PROVIDER
+  // ====================================================
 
   console.log(
     "\nConnecting to Robinhood Chain..."
@@ -428,15 +511,15 @@ async function main() {
     );
   }
 
+  // ====================================================
+  // WALLET
+  // ====================================================
+
   const wallet =
     new Wallet(
       privateKey,
       provider
     );
-
-  // Do not keep our own extra reference
-  // around longer than necessary.
-  // Wallet itself still needs the key for signing.
 
   console.log(
     ""
@@ -473,6 +556,10 @@ async function main() {
     );
   }
 
+  // ====================================================
+  // COMPILE
+  // ====================================================
+
   const compiled =
     compileContract();
 
@@ -482,6 +569,10 @@ async function main() {
       compiled.bytecode,
       wallet
     );
+
+  // ====================================================
+  // ESTIMATE
+  // ====================================================
 
   console.log(
     "\nEstimating deployment..."
@@ -506,10 +597,13 @@ async function main() {
     `Estimated gas: ${estimatedGas.toString()}`
   );
 
+  let estimatedCost =
+    null;
+
   if (
     feeData.gasPrice
   ) {
-    const estimatedCost =
+    estimatedCost =
       estimatedGas *
       feeData.gasPrice;
 
@@ -518,7 +612,20 @@ async function main() {
         estimatedCost
       )} ETH`
     );
+
+    if (
+      balance <
+      estimatedCost
+    ) {
+      throw new Error(
+        "Wallet ETH balance is below the estimated deployment gas cost."
+      );
+    }
   }
+
+  // ====================================================
+  // TOKEN INFO
+  // ====================================================
 
   console.log(
     ""
@@ -548,6 +655,10 @@ async function main() {
     ""
   );
 
+  // ====================================================
+  // MAINNET CONFIRMATION
+  // ====================================================
+
   const confirmation =
     String(
       await ask(
@@ -567,6 +678,10 @@ async function main() {
 
     return;
   }
+
+  // ====================================================
+  // DEPLOY
+  // ====================================================
 
   console.log(
     "\nDeploying TYCON..."
@@ -598,9 +713,17 @@ async function main() {
     );
 
     console.log(
+      "Explorer transaction:"
+    );
+
+    console.log(
       `${EXPLORER_URL}/tx/${transaction.hash}`
     );
   }
+
+  // ====================================================
+  // WAIT FOR DEPLOYMENT
+  // ====================================================
 
   console.log(
     "\nWaiting for confirmation..."
@@ -608,6 +731,10 @@ async function main() {
 
   await contract
     .waitForDeployment();
+
+  // ====================================================
+  // VERIFY RESULT
+  // ====================================================
 
   const contractAddress =
     await contract.getAddress();
@@ -620,6 +747,10 @@ async function main() {
 
   const totalSupply =
     await contract.totalSupply();
+
+  // ====================================================
+  // SUCCESS
+  // ====================================================
 
   console.log(
     "\n=========================================="
