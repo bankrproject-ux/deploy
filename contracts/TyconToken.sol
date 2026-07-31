@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 contract TyconToken {
-    string public constant name = "Mining Tycoon";
+    string public constant name = "Tycoon";
     string public constant symbol = "TYCON";
 
     uint8 public constant decimals = 18;
