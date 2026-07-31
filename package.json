@@ -5,7 +5,8 @@
   "description": "TYCON token deployment CLI for Robinhood Chain",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "mint": "node src/mint.js"
   },
   "dependencies": {
     "ethers": "^6.15.0",
